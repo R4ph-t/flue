@@ -6,7 +6,7 @@ By the end, you will have a live Render Web Service running Flue agents, and you
 
 ## Prerequisites
 
-- Comfort with the concepts in [Deploy Agents on Node.js](./deploy-node.md).
+- Familiarity with the [Deploy Agents on Node.js](./deploy-node.md) guide.
 - An API key for your model provider. The template prompts for `ANTHROPIC_API_KEY` by default.
 
 ## What you'll build
