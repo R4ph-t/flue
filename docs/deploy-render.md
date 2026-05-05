@@ -2,7 +2,7 @@
 
 Run Flue's Node.js build output on Render, starting from the [Flue template](https://render.com/templates/flue). This guide builds on [Deploy Agents on Node.js](./deploy-node.md) and focuses on the Render-specific setup.
 
-By the end, you will have a live Render web service running Flue agents, and you will know how to add Render-managed persistence and scheduled agent runs.
+By the end, you will have a live Render web service running Flue agents, and you will know how to add Render-managed persistence on top.
 
 ## Prerequisites
 
@@ -16,7 +16,7 @@ Starting from the template, you'll ship a live Flue agent on Render that you can
 1. Deploy a Flue web service on Render.
 2. Send real requests to the `translate` and `assistant` agents.
 3. Read the `render.yaml` that makes the deploy work.
-4. Add durable sessions or scheduled runs when your agent needs them.
+4. Add durable sessions when your agent needs them.
 
 ## 1. Deploy the template
 
@@ -84,7 +84,7 @@ curl https://<service>.onrender.com/agents/assistant/session-1 \
 
 Reusing the ID keeps Flue's session scope stable. On Node.js, that session state lives in memory unless you wire up a custom store.
 
-Render closes idle HTTP connections after about 100 seconds. Most prompt-and-response agents finish well inside that window, but if you build agents that run long tool chains or large multi-step prompts, plan for either streamed responses or the cron pattern in section 6 instead of a single blocking request.
+Render closes idle HTTP connections after about 100 seconds. Most prompt-and-response agents finish well inside that window, but if you build agents that run long tool chains or large multi-step prompts, plan for either streamed responses or a scheduled / background runner (see [Going further](#going-further)) instead of a single blocking request.
 
 > **A conversational session works end to end.**
 >
@@ -277,48 +277,14 @@ If the response references `42`, your `SessionStore` is reading and writing thro
 
 > Your sessions now survive deploys, restarts, and scale-out.
 
-## 6. Add a scheduled agent
-
-Some agents shouldn't sit behind an HTTP endpoint. Nightly summaries, weekly reports, periodic audits, API syncs, and cache refreshes work better as scheduled jobs. Render cron jobs run a command on a schedule and exit when the work is done, which is a clean fit for agents you invoke with `flue run`.
-
-Add a cron service to the template's `render.yaml`. The example below assumes a `digest` agent in `.flue/agents/`. Swap in any agent name from your workspace:
-
-```yaml
-services:
-  - type: cron
-    name: nightly-digest
-    runtime: node
-    plan: starter
-    schedule: "0 8 * * *"
-    buildCommand: npm ci
-    startCommand: npx flue run digest --target node --id nightly-digest --payload '{"date":"today"}'
-    envVars:
-      - key: ANTHROPIC_API_KEY
-        sync: false
-```
-
-Two things to remember:
-
-- Cron schedules use UTC. Quote the `schedule` value so YAML doesn't try to parse a leading `*` as an alias.
-- The cron runs `buildCommand` and then `startCommand` on every fire. If your install prunes dev dependencies, keep `@flue/cli` available at runtime so `npx flue run` can resolve.
-
-To verify the cron without waiting for the schedule:
-
-1. Commit the updated `render.yaml` and let Render create the cron service.
-2. Open the cron service in the Render Dashboard.
-3. Click **Trigger Run**.
-4. Open the **Logs** tab and watch the run progress.
-5. Confirm the final `flue run` output for the `digest` agent appears in the logs.
-
-If the run completes cleanly, your scheduled agent is ready for production.
-
-> You can run a Flue agent on a schedule and verify the result straight from Render logs.
-
 ## Going further
 
-For continuous, queue-backed agents, reach for a Render background worker. A common setup: a web service enqueues a job, a background worker pulls it from Render Key Value, the worker invokes a Flue agent, and the result lands in your data store. When Key Value is backing a queue, set `maxmemoryPolicy: noeviction` so jobs are never evicted.
+A few patterns this guide doesn't cover yet:
 
-For more, see Render's [Background Workers](https://render.com/docs/background-workers) docs and the [Blueprint reference](https://render.com/docs/blueprint-spec).
+- **Scheduled runs.** Some agents work better as periodic jobs than as webhooks (nightly summaries, weekly reports, cache refreshes). Deploy them as a Render cron job whose `startCommand` is `npx flue run <agent> --target node --id <id>`. Each fire builds, runs the agent once, and exits.
+- **Queue-backed workers.** For continuous, queue-backed agents, reach for a Render background worker. A common setup: a web service enqueues a job, a background worker pulls it from Render Key Value, the worker invokes a Flue agent, and the result lands in your data store. When Key Value is backing a queue, set `maxmemoryPolicy: noeviction` so jobs are never evicted.
+
+For more, see Render's [Cron Jobs](https://render.com/docs/cron-jobs), [Background Workers](https://render.com/docs/background-workers), and the [Blueprint reference](https://render.com/docs/blueprint-spec).
 
 ## Troubleshooting
 
@@ -330,5 +296,4 @@ When a step doesn't behave as expected, run through these quick checks:
 | Agent call returns a provider error | Confirm the matching provider key is set in the service's environment variables. |
 | Build can't find `flue` | Make sure `@flue/cli` is installed and available during the build or start command. |
 | Agent forgets context after a deploy | Wire up a custom `SessionStore` backed by Postgres or Key Value. |
-| Cron job doesn't run when you expect | Re-check the `schedule` value: quote it (so YAML doesn't try to alias a leading `*`) and remember it's evaluated in UTC. |
 
